@@ -1,0 +1,456 @@
+--View the entire dataset
+SELECT *
+FROM PortfolioProject..Superstore
+
+-- Number of Rows
+SELECT COUNT(*) AS num_rows
+FROM PortfolioProject..Superstore;
+
+--Number of Columns
+SELECT COUNT(*) AS num_columns
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'Superstore';
+
+--Checks for NULL Values across the entire columns
+SELECT *
+FROM PortfolioProject..Superstore
+WHERE Row_ID IS NULL OR Order_ID IS NULL OR Order_Date IS NULL OR Ship_Date IS NULL OR Ship_Mode IS NULL OR Customer_ID IS NULL 
+OR Customer_Name IS NULL OR Segment IS NULL OR Country_Region IS NULL OR City IS NULL OR State IS NULL OR Postal_Code IS NULL 
+OR Region IS NULL OR Product_ID IS NULL OR Category IS NULL OR Sub_Category IS NULL OR Product_Name IS NULL OR Sales IS NULL 
+OR Quantity IS NULL OR Discount IS NULL OR Profit IS NULL;
+
+--Checks for replacement for missing values
+SELECT *
+FROM PortfolioProject..Superstore
+WHERE State = 'Vermont'
+
+--------------------------------------------------------POSTAL CODE COLUMN DATA CLEANING--------------------------------------------------------------------------------------------
+
+-- Vermont State has no postal code in the dataset, I checked google and realized the Postal_Code is 05401, so I will replace the null values with this value.
+--Updating null values for Burlington Vermont.
+UPDATE Superstore
+SET postal_code = '05401'
+WHERE state = 'Vermont' AND city = 'Burlington' AND postal_code IS NULL;
+
+--Postal_code updated as '5401' instead of '05401' stated. So I checked for the data type of the postal_code column and updated it
+ALTER TABLE Superstore
+ALTER COLUMN postal_code VARCHAR(10); -- Assume postal codes are 10 characters long
+
+--Adding leading zero to existing values
+UPDATE Superstore
+SET postal_code = RIGHT('00000' + postal_code, 5)
+WHERE state = 'Vermont' AND city = 'Burlington' AND postal_code IS NOT NULL;
+
+--I noticed that there are some incorrect postal_code in my data without leading zeros and having just 4 digits
+--Checked for the Postal_code with 4 digits instead of 5 and checked google for confirmation
+SELECT *
+FROM Superstore
+WHERE LEN(postal_code) = 4 AND postal_code IS NOT NULL;
+
+--Updating the 4 digits with leading zeros to make it 5 digits.
+UPDATE Superstore
+SET postal_code = RIGHT('0000' + postal_code, 5)
+WHERE LEN(postal_code) = 4 AND postal_code IS NOT NULL;
+
+----------------------------------------------------------------- REPLACING NULL VALUES IN PROFIT COLUMN---------------------------------------------------------------------------
+
+UPDATE Superstore
+SET Profit = 0
+WHERE Row_ID = 7345 AND Profit IS NULL;
+
+------------------------------------------------------------------------------------------------DATE------------------------------------------------------------------------------------
+--Extracting only the date portion from the Order_Date
+SELECT CONVERT(date, order_date) AS order_date_only
+FROM Superstore;
+
+--Checks for the data type of the order_date column
+
+SELECT DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'Superstore' AND COLUMN_NAME = 'order_date';
+
+UPDATE Superstore
+SET order_date = CONVERT(DATE, order_date);
+
+--Changed the datatype for Order_date column from datetime(2) to date.
+ALTER TABLE Superstore
+ALTER COLUMN order_date DATE;
+
+--------------------------------------------------------------------LEADING AND TRAILING SPACES CHECK-------------------------------------------------------------------
+
+--return rows where the "Customer_Name" column contains leading or trailing spaces.
+SELECT Customer_Name
+FROM Superstore
+WHERE LEN(Customer_Name) > LEN(LTRIM(Customer_Name)) OR LEN(Customer_Name) > LEN(RTRIM(Customer_Name));
+
+---------------------------------------------------------------------------------DUPLICATE DATA--------------------------------------------------------------------------
+--Identify duplicate records in the Superstore table where all column values are identical
+SELECT *
+FROM Superstore
+WHERE Row_ID NOT IN (
+    SELECT MIN(Row_ID)
+    FROM Superstore
+    GROUP BY Row_ID, Order_ID, Order_Date, Ship_Date, Ship_Mode, Customer_ID, Customer_Name, Segment, Country_Region, City, State, Postal_Code, Region, Product_ID, Category, Sub_Category, Product_Name, Sales, Quantity, Discount, Profit
+);
+
+-----------------------------------------------------------------------------Ship_date data cleaning------------------------------------------------------------------------------------------------------------------------
+-- From my dataset, i noticed that the difference between Order date and Ship date is incorrect. Order is made before shipping and from the dataset we have Ship_date 2years before order date in most cases.
+-- Update Ship_date by adding 2 years to the existing values
+UPDATE Superstore
+SET Ship_date = DATEADD(year, 2, Ship_date);
+
+
+-------------------------------------------------------------------------------- ANALYSIS ---------------------------------------------------------------------------------
+--Seperates the Order_date column into day, month, year and specifies what day of the week it is.
+SELECT 
+    DATEPART(day, order_date) AS order_day,
+    DATENAME(month, order_date) AS order_month,
+    DATEPART(year, order_date) AS order_year,
+    DATENAME(weekday, order_date) AS order_day_of_week
+FROM Superstore;
+
+
+-- Calculate total sales for each month from 2020-2023
+WITH MonthlySales AS (
+    SELECT 
+        DATEPART(year, order_date) AS order_year,
+        DATENAME(month, order_date) AS order_month,
+        DATEPART(month, order_date) AS month_number,
+        SUM(sales) AS total_sales
+    FROM Superstore
+    GROUP BY DATEPART(year, order_date), DATENAME(month, order_date), DATEPART(month, order_date)
+)
+-- Calculate percentage sales for each month
+SELECT 
+    order_year,
+    order_month,
+    total_sales,
+    total_sales * 100.0 / SUM(total_sales) OVER () AS percentage_sales
+FROM MonthlySales
+ORDER BY order_year, month_number;
+
+
+--What month of the year do we have the highest percentage_sales
+WITH MonthlySales AS (
+    SELECT 
+        DATEPART(year, order_date) AS order_year,
+        DATENAME(month, order_date) AS order_month,
+        DATEPART(month, order_date) AS month_number,
+        SUM(sales) AS total_sales
+    FROM Superstore
+    GROUP BY DATEPART(year, order_date), DATENAME(month, order_date), DATEPART(month, order_date)
+)
+
+SELECT 
+    order_year,
+    order_month,
+    total_sales,
+    total_sales * 100.0 / SUM(total_sales) OVER () AS percentage_sales
+FROM MonthlySales
+ORDER BY percentage_sales desc;
+
+
+--What month of the year do we have the highest profit percentage
+-- Calculate total sales for each month from 2020-2023
+WITH MonthlyProfit AS (
+    SELECT 
+        DATEPART(year, order_date) AS order_year,
+        DATENAME(month, order_date) AS order_month,
+        DATEPART(month, order_date) AS month_number,
+        SUM(Profit) AS total_profit
+    FROM Superstore
+    GROUP BY DATEPART(year, order_date), DATENAME(month, order_date), DATEPART(month, order_date)
+)
+
+-- Calculate percentage sales for each month
+SELECT 
+    order_year,
+    order_month,
+    total_profit,
+    total_profit * 100.0 / SUM(total_profit) OVER () AS percentage_profit
+FROM MonthlyProfit
+ORDER BY percentage_profit desc;
+
+
+--Total sales made for each year
+SELECT 
+	SUM(CASE WHEN YEAR(Order_Date) = 2020 THEN Sales ELSE 0 END) AS total_sales_2020,
+	SUM(CASE WHEN YEAR(Order_Date) = 2021 THEN Sales ELSE 0 END) AS total_sales_2021,
+    SUM(CASE WHEN YEAR(Order_Date) = 2022 THEN Sales ELSE 0 END) AS total_sales_2022,
+    SUM(CASE WHEN YEAR(Order_Date) = 2023 THEN Sales ELSE 0 END) AS total_sales_2023
+FROM Superstore;
+
+
+--Difference in days between Order_Date and Ship_date
+SELECT 
+    Order_Date,
+	Ship_Date,
+    DATEDIFF(day, Order_Date, Ship_Date) AS days_to_ship
+FROM Superstore;
+
+
+--Shows maximum, minimum, and average ship_days
+WITH MAX_SHIPDAYS AS (
+	SELECT 
+		Order_Date,
+		Ship_Date,
+		DATEDIFF(day, Order_Date, Ship_Date) AS days_to_ship
+FROM Superstore
+)
+
+SELECT
+	MAX(days_to_ship) AS Max_ship_days,
+	MIN(days_to_ship) AS Min_ship_days,
+	AVG(days_to_ship) AS Average_ship_days
+FROM MAX_SHIPDAYS
+
+
+--Shows the Average_ship_days for each Ship_mode
+WITH MAX_SHIPDAYS AS (
+	SELECT 
+		DISTINCT(Ship_Mode) AS Mode,
+		Order_Date,
+		Ship_Date,
+		DATEDIFF(day, Order_Date, Ship_Date) AS days_to_ship
+FROM Superstore
+)
+
+SELECT
+	Mode,
+	MAX(days_to_ship) AS Max_ship_days,
+	MIN(days_to_ship) AS Min_ship_days,
+	AVG(days_to_ship) AS Average_ship_days
+FROM MAX_SHIPDAYS
+GROUP BY Mode
+ORDER BY Average_ship_days
+
+-- Count the number of unique Customer_ID values
+SELECT COUNT(DISTINCT Customer_ID) AS num_unique_customers
+FROM Superstore;
+
+-- Checks for distinct segment
+SELECT DISTINCT Segment
+FROM Superstore
+
+-- Calculate total sales per segment for each year
+SELECT 
+    YEAR(Order_Date) AS order_year,
+    Segment,
+    SUM(Sales) AS total_sales
+FROM Superstore
+GROUP BY YEAR(Order_Date), Segment
+ORDER BY order_year, Segment;
+
+-- Find the segment with the highest total sales
+SELECT TOP 3
+    Segment,
+    SUM(Sales) AS total_sales
+FROM Superstore
+GROUP BY Segment
+ORDER BY total_sales DESC;
+
+--shows the Segment with the highest number of customers
+SELECT Segment, COUNT(DISTINCT Customer_ID) AS num_customers
+FROM Superstore
+GROUP BY Segment
+ORDER BY num_customers DESC
+
+--Shows the number of orders, total sales, and total profit for each region.
+SELECT 
+    Region,
+    COUNT(*) AS num_orders,
+    SUM(Sales) AS total_sales,
+    SUM(Profit) AS total_profit
+FROM 
+    Superstore
+GROUP BY 
+    Region
+ORDER BY 
+    num_orders DESC;
+
+--Shows the top 10 Customers based on their total sales
+SELECT TOP 10
+	Customer_ID,
+    Customer_Name,
+    SUM(Sales) AS total_sales
+FROM 
+    Superstore
+GROUP BY 
+    Customer_ID, Customer_Name
+ORDER BY 
+    total_sales DESC
+
+
+--Shows the top 10 Customers based on their total Profit
+SELECT TOP 10
+	Customer_ID,
+    Customer_Name,
+    SUM(Profit) AS total_profit
+FROM 
+    Superstore
+GROUP BY 
+    Customer_ID, Customer_Name
+ORDER BY 
+    total_profit DESC
+
+--Shows the count of each category ranking from highest to lowest
+SELECT Category,
+	   COUNT(*) AS category_num
+FROM Superstore
+GROUP BY Category
+ORDER BY category_num desc
+
+--Shows the total sales per state in the year 2023
+SELECT 
+	State,
+	CONCAT('$', FORMAT(SUM(Sales), 'N2')) AS total_sales,
+	CASE 
+        WHEN SUM(Profit) >= 0 THEN CONCAT('$', FORMAT(SUM(Profit), 'N2'))
+        ELSE CONCAT('-$', FORMAT(ABS(SUM(Profit)), 'N2'))
+    END AS total_profit
+FROM Superstore
+WHERE 
+    YEAR(Order_Date) = 2023
+GROUP BY State
+ORDER BY CAST(SUM(Sales) AS DECIMAL(18,2)) DESC;
+
+
+--Shows the overall quantity for each Category
+SELECT
+	Category,
+	SUM(Quantity) AS total_quantity
+FROM Superstore
+GROUP BY Category
+
+
+--Shows the total sales per state in the year 2023
+SELECT 
+	State,
+	CONCAT('$', FORMAT(SUM(Sales), 'N2')) AS total_sales,
+	CASE 
+        WHEN SUM(Profit) >= 0 THEN CONCAT('$', FORMAT(SUM(Profit), 'N2'))
+        ELSE CONCAT('-$', FORMAT(ABS(SUM(Profit)), 'N2'))
+    END AS total_profit
+FROM Superstore
+WHERE 
+    YEAR(Order_Date) = 2023
+GROUP BY State
+ORDER BY CAST(SUM(Sales) AS DECIMAL(18,2)) DESC;
+
+
+
+-- Calculate total sales by month for 2022 and 2023
+WITH SalesByMonth2022 AS (
+    SELECT 
+        DATENAME(month, order_date) AS order_month,
+        SUM(sales) AS total_sales_2022
+    FROM Superstore
+    WHERE DATEPART(year, order_date) = 2022
+    GROUP BY DATENAME(month, order_date)
+),
+
+SalesByMonth2023 AS (
+    SELECT 
+        DATENAME(month, order_date) AS order_month,
+        SUM(sales) AS total_sales_2023
+    FROM Superstore
+    WHERE DATEPART(year, order_date) = 2023
+    GROUP BY DATENAME(month, order_date)
+)
+
+SELECT 
+    COALESCE(sales_2022.order_month, sales_2023.order_month) AS order_month,
+    total_sales_2022,
+    total_sales_2023
+FROM SalesByMonth2022 sales_2022
+FULL OUTER JOIN SalesByMonth2023 sales_2023
+ON sales_2022.order_month = sales_2023.order_month
+ORDER BY CASE 
+            WHEN sales_2022.order_month = 'January' THEN 1
+            WHEN sales_2022.order_month = 'February' THEN 2
+            WHEN sales_2022.order_month = 'March' THEN 3
+            WHEN sales_2022.order_month = 'April' THEN 4
+            WHEN sales_2022.order_month = 'May' THEN 5
+            WHEN sales_2022.order_month = 'June' THEN 6
+            WHEN sales_2022.order_month = 'July' THEN 7
+            WHEN sales_2022.order_month = 'August' THEN 8
+            WHEN sales_2022.order_month = 'September' THEN 9
+            WHEN sales_2022.order_month = 'October' THEN 10
+            WHEN sales_2022.order_month = 'November' THEN 11
+            WHEN sales_2022.order_month = 'December' THEN 12
+        END;
+
+-- Calculate total PROFIT by month for 2022 and 2023
+WITH SalesByMonth2022 AS (
+    SELECT 
+        DATENAME(month, order_date) AS order_month,
+        SUM(sales) AS total_sales_2022
+    FROM Superstore
+    WHERE DATEPART(year, order_date) = 2022
+    GROUP BY DATENAME(month, order_date)
+),
+
+SalesByMonth2023 AS (
+    SELECT 
+        DATENAME(month, order_date) AS order_month,
+        SUM(sales) AS total_sales_2023
+    FROM Superstore
+    WHERE DATEPART(year, order_date) = 2023
+    GROUP BY DATENAME(month, order_date)
+)
+
+SELECT 
+    COALESCE(sales_2022.order_month, sales_2023.order_month) AS order_month,
+    total_sales_2022,
+    total_sales_2023
+FROM SalesByMonth2022 sales_2022
+FULL OUTER JOIN SalesByMonth2023 sales_2023
+ON sales_2022.order_month = sales_2023.order_month
+ORDER BY CASE 
+            WHEN sales_2022.order_month = 'January' THEN 1
+            WHEN sales_2022.order_month = 'February' THEN 2
+            WHEN sales_2022.order_month = 'March' THEN 3
+            WHEN sales_2022.order_month = 'April' THEN 4
+            WHEN sales_2022.order_month = 'May' THEN 5
+            WHEN sales_2022.order_month = 'June' THEN 6
+            WHEN sales_2022.order_month = 'July' THEN 7
+            WHEN sales_2022.order_month = 'August' THEN 8
+            WHEN sales_2022.order_month = 'September' THEN 9
+            WHEN sales_2022.order_month = 'October' THEN 10
+            WHEN sales_2022.order_month = 'November' THEN 11
+            WHEN sales_2022.order_month = 'December' THEN 12
+        END;
+
+
+-- Calculate the number of orders by month for 2022
+WITH OrdersByMonth2022 AS (
+    SELECT 
+        DATEPART(month, order_date) AS order_month,
+        COUNT(*) AS num_orders_2022
+    FROM Superstore
+    WHERE YEAR(order_date) = 2022
+    GROUP BY DATEPART(month, order_date)
+),
+
+-- Calculate the number of orders by month for 2023
+OrdersByMonth2023 AS (
+    SELECT 
+        DATEPART(month, order_date) AS order_month,
+        COUNT(*) AS num_orders_2023
+    FROM Superstore
+    WHERE YEAR(order_date) = 2023
+    GROUP BY DATEPART(month, order_date)
+)
+
+-- Combine order data for 2022 and 2023
+SELECT 
+    COALESCE(orders_2022.order_month, orders_2023.order_month) AS order_month,
+    num_orders_2022,
+    num_orders_2023
+FROM OrdersByMonth2022 orders_2022
+FULL OUTER JOIN OrdersByMonth2023 orders_2023
+ON orders_2022.order_month = orders_2023.order_month
+ORDER BY CASE 
+    WHEN orders_2022.order_month IS NOT NULL THEN MONTH(DATEFROMPARTS(2022, MONTH(orders_2022.order_month), 1))
+    ELSE MONTH(DATEFROMPARTS(2023, MONTH(orders_2023.order_month), 1))
+END;
